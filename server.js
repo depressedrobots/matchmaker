@@ -60,7 +60,7 @@ server.sockets.on("connection", function(socket) {
 			}	
 		}
 
-		console.log("player disconnected: " + socket.player);
+		console.log("player disconnected: %j ", socket.player);
 		
 		socket.player = null;
 	});
