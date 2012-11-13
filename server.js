@@ -128,16 +128,18 @@ server.sockets.on("connection", function(socket) {
 		var title = matchData.title;
 		var secondsPerRound = matchData.secondsPerRound;
 		var numRounds = matchData.numRounds;
+		var maxPlayers = matchData.maxPlayers;
 
 		//create new match object
 		var newMatch = new Match(title, secondsPerRound, numRounds);
+		newMatch.maxNumPlayers = maxPlayers;
 		matches.push(newMatch);
 		newMatch.matchID = matches.length-1;
 
 		//add player to match
 		newMatch.players.push(socket.player);
 
-		socket.emit("newMatchCreated", JSON.stringify(newMatch));
+		socket.emit("newMatchCreated", newMatch);
 		console.log("new match created: %j ", newMatch);
 	});
 
