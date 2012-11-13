@@ -119,10 +119,25 @@ server.sockets.on("connection", function(socket) {
 		console.log("createMatch: %j ", data);
 		if(socket.player === 'undefined') {
 			console.log("ERROR: player not bound to socket!");
+			socket.emit("newMatchCreationFailed", "Internal server error. Please sign out and sign in again.");
+			return;
 		}
 
 		console.log("match request from player: " + socket.player.uid);
 		
+		//check whether player is already in match
+		for( var mi = 0; mi < matches.length; mi++) {
+			var m = matches[mi];
+			for(var pi = 0; pi < m.players.length; pi++ ) {
+				var p = m.players[pi];
+				if(socket.player === p) {
+					console.log("ERROR: player already in match " + m.matchID);
+					socket.emit("newMatchCreationFailed", "You already registered in match #" + m.matchID);
+					return;
+				}
+			}
+		}
+
 		//parse user input
 		var matchData = data;
 		var title = matchData.title;
