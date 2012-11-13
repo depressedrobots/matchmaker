@@ -159,7 +159,7 @@ server.sockets.on("connection", function(socket) {
 	});
 
 	socket.on("getMatches", function(data) {
-		console.log(""+(new Date()) + ": matches list requested from " + socket.player.uid + "; sending " + matches.length + " matches...);
+		console.log(""+(new Date()) + ": matches list requested from " + socket.player.uid + "; sending " + matches.length + " matches...");
 		socket.emit("provideMatchesList", matches);
 	});
 
@@ -177,6 +177,15 @@ server.sockets.on("connection", function(socket) {
 			console.log(""+(new Date()) + ": ...failed!");
 			socket.emit("joinFailed", match);
 		}
+	});
+
+	socket.on("leaveMatch", function(data) {
+		var matchIndex = data.matchID;
+		var match = matches[matchIndex];
+		removePlayerFromMatch(socket.player, match);
+	
+		server.sockets.emit("playerLeftMatch", match);
+		match.lastActionTime = new Date().getTime();	
 	});
 
 	socket.on("ping", function( data ) {	
