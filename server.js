@@ -9,6 +9,7 @@ var Player = (function() {
 	function Player(uid_, name_) {
 		this.uid = uid_;
 		this.name = name_;
+		this.socekt = null;
 	}
 	return Player;
 })();
@@ -40,15 +41,7 @@ server.sockets.on("connection", function(socket) {
 		//remove player from all matches he is currently registered in
 		for( var matchIndex = 0; matchIndex < matches.length; matchIndex++ ) {
 			var match = matches[matchIndex];
-			console.log("match log: %j", match);
-			for( var playerIndex = 0; playerIndex < match.players.length; playerIndex++ ) {
-				var player = match.players[playerIndex];
-				if( player === socket.player ) {
-					match.players.splice(playerIndex, 1);
-					console.log("removed player " + socket.player.uid + " from match \"" + match.title + "\"");
-					break;
-				}
-			}
+			removePlayerFromMatch(socket.player, match);
 		}
 
 		//remove player from current player list
@@ -110,8 +103,69 @@ server.sockets.on("connection", function(socket) {
 		console.log("new match created: %j ", newMatch);
 	});
 
+	socket.on("getMatches", function(data) {
+		console.log("matches list requested from " + socket.player.uid + "; sending " + matches.length + " matches...");
+		socket.emit("provideMatchesList", matches);
+	});
+
 	socket.on("ping", function( data ) {	
 		console.log("PING with data: " + data);
 		socket.emit("pingBack", matches.length);
 	});
 });
+
+//////////////////////////////
+// HELPERS                  //
+//////////////////////////////
+
+function findSocketWithPlayer(player_) {
+	for( var si = 0; si < server.sockets.length; si++ ) {
+		var currentSocket = server.sockets[si];
+		if( currentSocket.player === player_ ) {
+			return currentSocket;
+		}
+	}
+
+	return null;
+};
+
+function removePlayerFromMatch(player_, match_) {
+	for( var playerIndex = 0; playerIndex < match_.players.length; playerIndex++ ) {
+		var player = match_.players[playerIndex];
+		if( player === player_ ) {
+			match_.players.splice(playerIndex, 1);
+			console.log("removed player " + player_.uid + " from match \"" + match_.title + "\"");
+			break;
+		}
+	}				
+	
+	//match empty of players? remove match!
+	if( match_.players.length == 0 ) {
+		destroyMatch( match_, "No players left in the match." );
+	}
+};
+
+function destroyMatch( match_, reason_ ) {
+	// first, notify all players that the match will be killed
+	for( var pi = 0; pi < match_.players.length; pi++ ) {
+		var player = match_.players[pi];
+		var playerSocket = findSocketWithPlayer(player);
+		if( null != playerSocket ) {
+			playerSocket.emit("matchDestroyed", reason_);
+		}
+		else {
+			console.log("ERROR: destroyMatch(): could not find socket of player %j", player);
+		} 
+	}
+
+	for( var mi = 0; mi < matches.length; mi++ ) {
+		var m = matches[mi];
+		if( m === match_ ) {
+			matches.splice(mi, 1);	
+			console.log("destroyed match %j", match_);
+			return;
+		}
+	}
+
+	console.log("ERROR: could not find %j in match array!", match_);	
+};
