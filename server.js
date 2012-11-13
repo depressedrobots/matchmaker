@@ -4,13 +4,18 @@ var server = io.listen(1337).set("log level", 1);
 var players = [];
 var matches = [];
 
+//CONSTANTS
+const MATCH_INACTIVITY_THRESHOLD = 300000;
+const HYGENE_INTERVAL = 10000;
+
 // player class
 var Player = (function() {
 	function Player(uid_, name_) {
 		this.uid = uid_;
 		this.name = name_;
-		this.socekt = null;
+		this.socket = null;
 	}
+
 	return Player;
 })();
 
@@ -23,10 +28,42 @@ var Match = (function() {
 		this.numRounds = numRounds_;
 		this.currentRound = 0;
 		this.players = [];
+		this.matchID = -1;
+		this.maxNumPlayers = 5;
+		this.status = "waitingForPlayers";
+		this.lastActionTime = new Date().getTime();
 	}
 	return Match; 
 })();
 
+//will be called at a steady interval to clean server of abandoned and timed out matches
+function onHygeneTimer() {
+
+	var now = new Date().getTime();
+	var markedIndeces = new Array();
+
+	//mark inactive matches
+	for( var i = 0; i < matches.length; i++ ) {
+		var match = matches[i];
+		var inactiveTime = now - match.lastActionTime;
+		if( inactiveTime >= MATCH_INACTIVITY_THRESHOLD ) {
+			match.status = "markedForDeletion";
+			markedIndeces.push(i);
+		}
+	}
+
+	//now destroy all marked matches
+	for( var j = 0; j < markedIndeces.length; j++ ) {
+		var matchIndex = markedIndeces[j];
+		var match = matches[matchIndex];
+		destroyMatch(match, "inactivity");
+	}
+};
+
+//start hygene timer
+setInterval( onHygeneTimer, HYGENE_INTERVAL);
+
+//start server
 server.sockets.on("connection", function(socket) {
 	socket.on("msg", function(data){
 		server.sockets.emit("broadcast", "serverMSG");
@@ -95,6 +132,7 @@ server.sockets.on("connection", function(socket) {
 		//create new match object
 		var newMatch = new Match(title, secondsPerRound, numRounds);
 		matches.push(newMatch);
+		newMatch.matchID = matches.length-1;
 
 		//add player to match
 		newMatch.players.push(socket.player);
@@ -104,8 +142,24 @@ server.sockets.on("connection", function(socket) {
 	});
 
 	socket.on("getMatches", function(data) {
-		console.log("matches list requested from " + socket.player.uid + "; sending " + matches.length + " matches...");
+		console.log("matches list requested from " + socket.player.uid + "; sending " + matches.length + " matches...\n%j",matches);
 		socket.emit("provideMatchesList", matches);
+	});
+
+	socket.on("joinMatch", function(data) {
+		var matchIndex = data.matchID;
+		var match = matches[matchIndex];
+		var ok = joinMatch(socket.player, match);
+		if( ok ) {
+			console.log("... success!");
+			socket.emit("joinSucceeded", match);
+			server.sockets.emit("playerJoinedMatch", match);
+			match.lastActionTime = new Date().getTime();
+		}
+		else {
+			console.log("...failed!");
+			socket.emit("joinFailed", match);
+		}
 	});
 
 	socket.on("ping", function( data ) {	
@@ -119,8 +173,9 @@ server.sockets.on("connection", function(socket) {
 //////////////////////////////
 
 function findSocketWithPlayer(player_) {
-	for( var si = 0; si < server.sockets.length; si++ ) {
-		var currentSocket = server.sockets[si];
+	//console.log("\n\nDEBUG: server has sockets " + server.sockets.clients().length + "\n\n");
+	for( var si = 0; si < server.sockets.clients().length; si++ ) {
+		var currentSocket = server.sockets.clients()[si];
 		if( currentSocket.player === player_ ) {
 			return currentSocket;
 		}
@@ -162,10 +217,40 @@ function destroyMatch( match_, reason_ ) {
 		var m = matches[mi];
 		if( m === match_ ) {
 			matches.splice(mi, 1);	
-			console.log("destroyed match %j", match_);
+			console.log("destroyed match %d", match_.matchID);
 			return;
 		}
 	}
 
 	console.log("ERROR: could not find %j in match array!", match_);	
+};
+
+function joinMatch(player_, match_) {
+	console.log("player wants to join: %j -> %j...", player_, match_);
+		
+	//game in lobby mode?
+	if( match_.status != "waitingForPlayers" ) {
+		console.log("...fail! match is no longer in lobby mode!");
+		return false;
+	}
+
+	//player cap for match reached?
+	if( match_.players.length == match_.maxNumPlayers ) {
+		console.log("...fail! player cap reached: " + match_.maxNumPlayers);
+		return false;
+	}
+
+	// no double booking!
+	for( var pi = 0; pi < match_.players.length; pi++ ) {
+		var matchPlayer = match_.players[pi];
+		if( player_ === matchPlayer ) {
+			console.log("...fail! player is already in match!");
+			return false;
+		}
+	}
+
+	match_.players.push(player_);
+	console.log("...success! new players: %j", match_.players);
+
+	return true;
 };
