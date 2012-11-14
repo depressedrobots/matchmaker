@@ -32,6 +32,7 @@ var Match = (function() {
 		this.maxNumPlayers = 5;
 		this.status = "waitingForPlayers";
 		this.lastActionTime = new Date().getTime();
+		this.currentOwner = "";
 	}
 	return Match; 
 })();
@@ -150,6 +151,7 @@ server.sockets.on("connection", function(socket) {
 		newMatch.maxNumPlayers = maxPlayers;
 		matches.push(newMatch);
 		newMatch.matchID = matches.length-1;
+		newMatch.currentOwner = socket.player.uid;
 
 		//add player to match
 		newMatch.players.push(socket.player);
@@ -189,6 +191,18 @@ server.sockets.on("connection", function(socket) {
 		match.lastActionTime = new Date().getTime();	
 	});
 
+	socket.on("requestMatchStart", function(data) {
+		var matchIndex = data.matchID;
+		var match = matches[matchIndex];
+
+		//start match
+		match.status = "running";
+
+		server.sockets.emit("matchStarted", match);
+		match.lastActionTime = new Date().getTime();	
+		console.log(""+new Date()+": match #" + match.matchID + " started!");
+	});
+
 	socket.on("ping", function( data ) {	
 		console.log(""+(new Date()) + ": PING with data: " + data);
 		socket.emit("pingBack", matches.length);
@@ -219,12 +233,25 @@ function removePlayerFromMatch(player_, match_) {
 			console.log(""+(new Date()) + ": removed player " + player_.uid + " from match \"" + match_.title + "\"");
 			break;
 		}
-	}				
+	}		
 	
 	//match empty of players? remove match!
 	if( match_.players.length == 0 ) {
 		destroyMatch( match_, "No players left in the match." );
-	}
+		return;
+	}	
+
+	//transfer ownership of match, if necessary
+	if( match_.currentOwner == player_.uid ) {
+		var player = match_.players[0];
+		match_.currentOwner = player.uid;
+		var playerSocket = findSocketWithPlayer(player);
+		console.log(""+(new Date()) + ": transfered match (#" + match_.matchID + ") ownership to " + player.name );
+			
+		//notify player
+		playerSocket.emit("matchOwnerShipTransfered", match_);
+		
+	}	
 };
 
 function destroyMatch( match_, reason_ ) {
