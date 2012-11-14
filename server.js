@@ -207,6 +207,14 @@ server.sockets.on("connection", function(socket) {
 		console.log(""+(new Date()) + ": PING with data: " + data);
 		socket.emit("pingBack", matches.length);
 	});
+
+	socket.on("sendImage", function(data) {
+		console.log("received image data");
+		var dataBuffer = new Buffer(data, 'base64');
+		require("fs").writeFile("out.png", dataBuffer, function(err) {
+ 			 console.log(err);
+		});
+	});
 });
 
 //////////////////////////////
