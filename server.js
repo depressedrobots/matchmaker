@@ -155,6 +155,7 @@ server.sockets.on("connection", function(socket) {
 		newMatch.players.push(socket.player);
 
 		socket.emit("newMatchCreated", newMatch);
+		socket.broadcast.emit("playerJoinedMatch", newMatch);
 		console.log(""+(new Date()) + ": new match created: %j ", newMatch);
 	});
 
@@ -170,7 +171,7 @@ server.sockets.on("connection", function(socket) {
 		if( ok ) {
 			console.log(""+(new Date()) + ": ... success!");
 			socket.emit("joinSucceeded", match);
-			server.sockets.emit("playerJoinedMatch", match);
+			socket.broadcast.emit("playerJoinedMatch", match);
 			match.lastActionTime = new Date().getTime();
 		}
 		else {
