@@ -1,5 +1,6 @@
 var io = require("socket.io");
 var server = io.listen(1337).set("log level", 1);
+var fs = require("fs");
 
 var players = [];
 var matches = [];
@@ -29,7 +30,7 @@ var Match = (function() {
 		this.numRounds = numRounds_;
 		this.currentRound = 0;
 		this.players = [];
-		this.matchID = -1;
+		this.matchID = randomString(64);
 		this.maxNumPlayers = 5;
 		this.status = "waitingForPlayers";
 		this.lastActionTime = new Date().getTime();
@@ -118,7 +119,7 @@ server.sockets.on("connection", function(socket) {
 	
 	//request new match
 	socket.on("createMatch", function(data) {
-		console.log(""+(new Date()) + ": createMatch: %j ", data);
+	//	console.log(""+(new Date()) + ": createMatch: %j ", data);
 		if(socket.player === 'undefined') {
 			console.log(""+(new Date()) + ": ERROR: player not bound to socket!");
 			socket.emit("newMatchCreationFailed", "Internal server error. Please sign out and sign in again.");
@@ -151,7 +152,6 @@ server.sockets.on("connection", function(socket) {
 		var newMatch = new Match(title, secondsPerRound, numRounds);
 		newMatch.maxNumPlayers = maxPlayers;
 		matches.push(newMatch);
-		newMatch.matchID = matches.length-1;
 		newMatch.currentOwner = socket.player.uid;
 
 		//add player to match
@@ -159,7 +159,9 @@ server.sockets.on("connection", function(socket) {
 
 		socket.emit("newMatchCreated", newMatch);
 		socket.broadcast.emit("playerJoinedMatch", newMatch);
-		console.log(""+(new Date()) + ": new match created: %j ", newMatch);
+		console.log(""+(new Date()) + ": new match created: ", + newMatch.matchID);
+	
+		createMatchFile(newMatch);	
 	});
 
 	socket.on("getMatches", function(data) {
@@ -168,24 +170,35 @@ server.sockets.on("connection", function(socket) {
 	});
 
 	socket.on("joinMatch", function(data) {
-		var matchIndex = data.matchID;
-		var match = matches[matchIndex];
+		var match = findMatchByID(data.matchID);
+
+		if( null == match ) {
+			console.log(""+new Date() + ": ERROR: could not find match with ID " + data.matchID);
+			socket.emit("error", "The server could not find your match!");
+			return;
+		}
 		var ok = joinMatch(socket.player, match);
 		if( ok ) {
-			console.log(""+(new Date()) + ": ... success!");
+			console.log(""+(new Date()) + ": player " + socket.player.uid + "joined match + " + match.matchID);
 			socket.emit("joinSucceeded", match);
 			socket.broadcast.emit("playerJoinedMatch", match);
 			match.lastActionTime = new Date().getTime();
 		}
 		else {
-			console.log(""+(new Date()) + ": ...failed!");
+			console.log(""+(new Date()) + ": player " + socket.player.uid + " could not join match " + match.matchID);
 			socket.emit("joinFailed", match);
 		}
 	});
 
 	socket.on("leaveMatch", function(data) {
-		var matchIndex = data.matchID;
-		var match = matches[matchIndex];
+		var match = findMatchByID(data.matchID);
+
+		if( null == match ) {
+			console.log(""+new Date() + ": ERROR: could not find match with ID " + data.matchID);
+			socket.emit("error", "The server could not find your match!");
+			return;
+		}
+
 		removePlayerFromMatch(socket.player, match);
 	
 		server.sockets.emit("playerLeftMatch", match);
@@ -193,15 +206,20 @@ server.sockets.on("connection", function(socket) {
 	});
 
 	socket.on("requestMatchStart", function(data) {
-		var matchIndex = data.matchID;
-		var match = matches[matchIndex];
+		var match = findMatchByID(data.matchID);
 
+		if( null == match ) {
+			console.log(""+new Date() + ": ERROR: could not find match with ID " + data.matchID);
+			socket.emit("error", "The server could not find your match!");
+			return;
+		}
+	
 		//start match
 		match.status = "running";
 
 		server.sockets.emit("matchStarted", match);
 		match.lastActionTime = new Date().getTime();	
-		console.log(""+new Date()+": match #" + match.matchID + " started!");
+		console.log(""+new Date()+": match #" + match.matchID + " started! " + match.matchID);
 	});
 
 	socket.on("ping", function( data ) {	
@@ -214,7 +232,14 @@ server.sockets.on("connection", function(socket) {
 		var dataBuffer = new Buffer(data.imageData, 'base64');
 		socket.player.picturesMade = socket.player.picturesMade + 1;
 		console.log("player made " + socket.player.picturesMade + " pictures so far");
-		var match = matches[data.matchID];
+		var match = findMatchByID(data.matchID);
+
+		if( null == match ) {
+			console.log(""+new Date() + ": ERROR: could not find match with ID " + data.matchID);
+			socket.emit("error", "The server could not find your match!");
+			return;
+		}
+
 		saveImage(dataBuffer, match, socket.player);		
 	});
 });
@@ -223,12 +248,70 @@ server.sockets.on("connection", function(socket) {
 // HELPERS                  //
 //////////////////////////////
 
+
+//////////////////////////
+// FILE IO		//
+//////////////////////////
+
+function createMatchFile(match_) {
+	var directory = "./" + match_.matchID;
+	
+	///check if match directory exists
+	if( !dirExistsSync(directory) ) {
+		//create match directory and match info file
+		fs.mkdirSync(directory);
+		var infoFilename = directory + "/match.json";
+		var matchString = JSON.stringify(match_, null, 4);
+		fs.writeFileSync(infoFilename, matchString, "ascii", function(err) {
+			console.log("" + new Date() + ": ERROR writing match info file to " + infoFilename + "! " + err);
+		});	
+	}	
+}
+
+function dirExists (d, cb) {
+  fs.stat(d, function (er, s) { cb(!er && s.isDirectory()) })
+}
+
+function dirExistsSync (d) {
+  	try { fs.statSync(d).isDirectory() }
+  	catch (er) { return false }
+	
+	return true;
+}
+
 function saveImage(dataBuffer_, match_, player_) {
-	var filename = "" + match_.matchID + "_" + player_.uid + "_" + player_.picturesMade + ".jpg";
-	require("fs").writeFile(filename, dataBuffer_, function(err) {
- 		 console.log(err);
+	var directory = "./" + match_.matchID;
+	
+	var filename = directory + "/" + player_.uid + "_" + player_.picturesMade + ".jpg";
+
+	fs.writeFile(filename, dataBuffer_, function(err) {
+		if(null == err ) {
+			console.log("" + new Date() + ": INFO written image file to " + filename + "");
+		}
+		else {
+			console.log("" + new Date() + ": ERROR writing image file to " + filename + "! " + err);
+		}
 	});
 };
+
+function getImageFilenamesForPlayerAndMatch(player_, match_) {
+	
+};
+
+//////////////////////////
+// OBJECT FINDERS	//
+//////////////////////////
+
+function findMatchByID(matchID_) {
+	for( var i = 0; i < matches.length; i++) {
+		var match = matches[i];
+		if( match.matchID === matchID_ ) {
+			return match;
+		}
+	}
+
+	return null;
+}
 
 function findSocketWithPlayer(player_) {
 	//console.log(""+(new Date()) + ": \n\nDEBUG: server has sockets " + server.sockets.clients().length + "\n\n");
@@ -288,7 +371,7 @@ function destroyMatch( match_, reason_ ) {
 		var m = matches[mi];
 		if( m === match_ ) {
 			matches.splice(mi, 1);	
-			console.log(""+(new Date()) + ": destroyed match %d", match_.matchID);
+			console.log(""+(new Date()) + ": destroyed match " + match_.matchID);
 			return;
 		}
 	}
@@ -324,4 +407,24 @@ function joinMatch(player_, match_) {
 	console.log(""+(new Date()) + ": ...success! new players: %j", match_.players);
 
 	return true;
+};
+
+function randomString(bits) {
+	var chars,rand,i,ret;
+
+  	chars='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+-';
+  	ret='';
+
+  	// in v8, Math.random() yields 32 pseudo-random bits (in spidermonkey it gives 53)
+
+ 	while(bits > 0){
+
+    		rand=Math.floor(Math.random()*0x100000000) // 32-bit integer
+
+    		// base 64 means 6 bits per character, so we use the top 30 bits from rand to give 30/6=5 characters.
+
+    		for(i=26; i>0 && bits>0; i-=6, bits-=6) ret+=chars[0x3F & rand >>> i]
+	}
+
+  	return ret;
 };
