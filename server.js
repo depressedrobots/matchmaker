@@ -14,6 +14,7 @@ var Player = (function() {
 		this.uid = uid_;
 		this.name = name_;
 		this.socket = null;
+		this.picturesMade = 0;
 	}
 
 	return Player;
@@ -210,16 +211,24 @@ server.sockets.on("connection", function(socket) {
 
 	socket.on("sendImage", function(data) {
 		console.log("received image data");
-		var dataBuffer = new Buffer(data, 'base64');
-		require("fs").writeFile("out.png", dataBuffer, function(err) {
- 			 console.log(err);
-		});
+		var dataBuffer = new Buffer(data.imageData, 'base64');
+		socket.player.picturesMade = socket.player.picturesMade + 1;
+		console.log("player made " + socket.player.picturesMade + " pictures so far");
+		var match = matches[data.matchID];
+		saveImage(dataBuffer, match, socket.player);		
 	});
 });
 
 //////////////////////////////
 // HELPERS                  //
 //////////////////////////////
+
+function saveImage(dataBuffer_, match_, player_) {
+	var filename = "" + match_.matchID + "_" + player_.uid + "_" + player_.picturesMade + ".jpg";
+	require("fs").writeFile(filename, dataBuffer_, function(err) {
+ 		 console.log(err);
+	});
+};
 
 function findSocketWithPlayer(player_) {
 	//console.log(""+(new Date()) + ": \n\nDEBUG: server has sockets " + server.sockets.clients().length + "\n\n");
